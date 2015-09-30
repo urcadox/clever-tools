@@ -12,6 +12,15 @@ module.exports = function(repositoryPath) {
   var Git = {};
   Git.GIT_BRANCH_LOCAL = 1;
 
+  Git.fetchOptions = Git.pushOptions = {
+    callbacks: {
+      certificateCheck: function() { return 1; },
+      credentials: function(url, username) {
+        return nodegit.Cred.sshKeyFromAgent(username);
+      }
+    }
+  };
+
   Git.getRepository = function() {
     Logger.debug("Open the local repository…");
     return Bacon.fromPromise(nodegit.Repository.open(repositoryPath)).toProperty();
@@ -20,16 +29,7 @@ module.exports = function(repositoryPath) {
   Git.getRemote = function(name) {
     return Git.getRepository().flatMapLatest(function(repository) {
       Logger.debug("Load the \"" + name + "\" remote…");
-      return Bacon.fromPromise(nodegit.Remote.lookup(repository, name)).toProperty().map(function(remote) {
-        Logger.debug("Use ssh-agent for authentication…");
-        remote.setCallbacks({
-          certificateCheck: function() { return 1; },
-          credentials: function(url, username) {
-            return nodegit.Cred.sshKeyFromAgent(username);
-          }
-        });
-        return remote;
-      });
+      return Bacon.fromPromise(nodegit.Remote.lookup(repository, name));
     });
   };
 
@@ -78,15 +78,6 @@ module.exports = function(repositoryPath) {
         Bacon.fromPromise(nodegit.Remote.create(repository, name, url));
         Logger.debug("Created remote " + name);
         return Git.getRemote(name);
-      }).flatMapLatest(function(remote) {
-        Logger.debug("Use ssh-agent for authentication…");
-        remote.setCallbacks({
-          credentials: function(url, username) {
-            return nodegit.Cred.sshKeyFromAgent(username);
-          }
-        });
-
-        return remote;
       });
     });
 
@@ -94,21 +85,19 @@ module.exports = function(repositoryPath) {
   };
 
   Git.fetch = function(remote) {
-    Logger.debug("Create a git signature…");
-    var signature = nodegit.Signature.now("clever-tools", "support@clever-cloud.com");
-
     Logger.debug("Fetching " + remote.name() + "…");
-    return Bacon.fromPromise(remote.fetch([remote.name()], signature, null)).map(remote);
+    return Bacon.fromPromise(
+      remote.fetch([remote.name()], Git.fetchOptions)
+    ).map(remote);
   };
 
   Git.keepFetching = function(timeout, remote) {
-    Logger.debug("Create a git signature…");
-    var signature = nodegit.Signature.now("clever-tools", "support@clever-cloud.com");
-
     var s_timeout = timeout > 0 ? Bacon.later(timeout, {}) : Bacon.never();
     var fetch = function() {
       Logger.debug("Fetching " + remote.name());
-      return Bacon.fromPromise(remote.fetch(["refs/heads/master"], signature, null)).map(remote).flatMapError(function(error) {
+      return Bacon.fromPromise(
+        remote.fetch(["refs/heads/master"], Git.fetchOptions)
+      ).map(remote).flatMapError(function(error) {
         return (error.message != "Early EOF") ? new Bacon.Error(error) : Bacon.later(10000, {}).flatMapLatest(function() {
           return fetch();
         });
@@ -160,15 +149,10 @@ module.exports = function(repositoryPath) {
       return s_commitId.flatMapLatest(function(commitIdToPush) {
         return Git.getRemoteCommitId(remote.name()).flatMapLatest(function(remoteCommitId) {
           if(remoteCommitId != commitIdToPush) {
-            remote.setCallbacks({
-              certificateCheck: function() { return 1; },
-              credentials: function(url, userName) {
-                return nodegit.Cred.sshKeyFromAgent(userName);
-              }
-            });
-
             Logger.debug("Preparing the push");
-            return Bacon.fromPromise(remote.push([forcePush + branch + ":refs/heads/master"]));
+            return Bacon.fromPromise(
+              remote.push([forcePush + branch + ":refs/heads/master"], Git.pushOptions)
+            );
           } else {
             return new Bacon.Error("Nothing to push");
           }
