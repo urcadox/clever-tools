@@ -96,7 +96,7 @@ describe("git", function() {
     });
   });
 
-  it("should push to the origin remote", function(done) {
+  xit("should push to the origin remote", function(done) {
     var s_push = git.getRemote("origin").flatMapLatest(function(remote) {
       return git.push(remote, "master", Bacon.once("0000000000000000000000000000000000000000"), false);
     });
